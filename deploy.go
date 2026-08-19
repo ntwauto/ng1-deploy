@@ -194,6 +194,9 @@ func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, 
 	}
 
 	// --- Create PAM file ---
+	// PAMLine() substitutes cfg.NGeniusServer.IP/Port into the template,
+	// so the auth config always points at the same server used in the
+	// reachability check below — no risk of the two drifting apart.
 	pamLine := cfg.PAMLine()
 	createPamCmd := fmt.Sprintf("cat > /etc/pam.d/pam_ng1_auth << 'EOF'\n%s\nEOF", pamLine)
 	if _, err := runCmd(client, hl, createPamCmd); err != nil {
@@ -267,15 +270,19 @@ func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, 
 		"grep '^UsePAM yes' /etc/ssh/sshd_config", "UsePAM yes"))
 
 	validations = append(validations, checkBool(client, hl, "SSHD Running",
-		"pgrep sshd >/dev/null && echo PASS || echo FAIL", "PASS"))
+		"pgrep -x sshd >/dev/null && echo PASS || echo FAIL", "PASS"))
 
-	// Checks that the configured auth port is reachable from the device
-	// itself (loopback check), since devices are now the only IP source.
+	// Tests whether THIS device (the one we're currently SSH'd into) can
+	// reach the central nGenius server. cfg.NGeniusServer.IP/Port is the
+	// fixed NG1 server address that this device's PAM config now points
+	// at — the same value baked into pam_ng1_auth above. This is NOT the
+	// device's own address; the device is identified implicitly by which
+	// SSH connection this command runs over.
 	ngCheckCmd := fmt.Sprintf(
-		"timeout 5 bash -c '</dev/tcp/127.0.0.1/%s' && echo PASS || echo FAIL",
-		cfg.Port,
+		"timeout 5 bash -c '</dev/tcp/%s/%s' && echo PASS || echo FAIL",
+		cfg.NGeniusServer.IP, cfg.NGeniusServer.Port,
 	)
-	validations = append(validations, checkBool(client, hl, "Auth Port Reachable (local)", ngCheckCmd, "PASS"))
+	validations = append(validations, checkBool(client, hl, "nGenius Server Reachable", ngCheckCmd, "PASS"))
 
 	for _, user := range users {
 		name := fmt.Sprintf("User %s (%s)", user, mode)
