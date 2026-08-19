@@ -53,9 +53,8 @@ EXAMPLES:
 `)
 }
 
-
 func main() {
-	
+
 	flag.Usage = printHelp
 	configPath := flag.String("config", "", "path to config.yaml (overrides all other lookup locations)")
 	userAdd := flag.Bool("user-add", false, "add users from config's users_add list (default mode)")
@@ -121,12 +120,22 @@ func main() {
 			continue
 		}
 
+		// Write the header immediately so the per-host log file is never
+		// left empty on disk, no matter what fails next (connection,
+		// config push, validation, panic, etc). NewHostLogger opens the
+		// file with O_TRUNC, so from this point on the file is guaranteed
+		// to contain at least this header even in the worst case.
+		hl.WriteHeader(host)
+
 		start := time.Now()
 		client, err := NewSSHClient(host, username, password, cfg)
 		if err != nil {
+			hl.WriteLine("\nCONNECTION FAILED: %v\n", err)
+			hl.WriteFooter()
+			hl.Close()
+
 			logger.Error(host, "connection failed: %v", err)
 			logger.Summary("%s FAILED (connection error)", host)
-			hl.Close()
 			report.AddResult(HostResult{Host: host, Mode: mode, Err: err, StartTime: start, EndTime: time.Now()})
 			fmt.Printf("    -> ERROR: connection failed: %v\n", err)
 			continue
