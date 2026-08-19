@@ -11,7 +11,52 @@ import (
 	"golang.org/x/term"
 )
 
+func printHelp() {
+	fmt.Fprintf(os.Stderr, `NETSCOUT nGenius PAM Deployment Tool
+
+USAGE:
+  ng1-deploy [flags]
+
+DESCRIPTION:
+  Deploys/updates NetScout nGenius PAM authentication configuration
+  across a list of devices defined in config.yaml, and adds or removes
+  users from those devices based on the users_add / users_delete lists.
+
+FLAGS:
+  --config <path>   Path to config.yaml. Overrides all other lookup
+                     locations (env var, current directory, pointer
+                     file, fixed fallback paths).
+  --user-add         Add users from config's users_add list. (default)
+  --user-delete      Delete users from config's users_delete list.
+  --help, -h         Show this help message and exit.
+
+CONFIG FILE LOOKUP ORDER (used when --config is not provided):
+  1. --config flag value
+  2. NG1_CONFIG_PATH environment variable
+  3. ./config.yaml (current directory)
+  4. ./config.location or <binary-dir>/config.location pointer file
+  5. /etc/ng1-deploy/config.yaml
+  6. /opt/ng1-deploy/config.yaml
+
+CREDENTIALS:
+  SSH username/password are prompted interactively by default.
+  You can skip prompts by setting:
+    NG1_SSH_USER=<username>
+    NG1_SSH_PASSWORD=<password>
+
+EXAMPLES:
+  ng1-deploy
+  ng1-deploy --user-delete
+  ng1-deploy --config ./configs/prod.yaml --user-add
+  NG1_SSH_USER=root NG1_SSH_PASSWORD=secret ng1-deploy --user-add
+
+`)
+}
+
+
 func main() {
+	
+	flag.Usage = printHelp
 	configPath := flag.String("config", "", "path to config.yaml (overrides all other lookup locations)")
 	userAdd := flag.Bool("user-add", false, "add users from config's users_add list (default mode)")
 	userDelete := flag.Bool("user-delete", false, "delete users from config's users_delete list")
