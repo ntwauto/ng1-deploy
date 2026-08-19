@@ -81,7 +81,11 @@ func checkUserExists(client *SSHClient, hl *HostLogger, user string) (bool, erro
 	return strings.Contains(out, "EXISTS"), nil
 }
 
-// addUser adds a user if not present.
+// addUser adds a user if not present. Creates a normal account with a
+// unique UID/home directory and grants sudo via group membership,
+// rather than forcing UID/GID 0 — some useradd implementations silently
+// reject or mishandle a second UID-0 account, which previously caused
+// "user not present after useradd" failures.
 func addUser(client *SSHClient, hl *HostLogger, user string) UserOpResult {
 	res := UserOpResult{User: user, Mode: ModeAdd}
 
@@ -96,7 +100,16 @@ func addUser(client *SSHClient, hl *HostLogger, user string) UserOpResult {
 		return res
 	}
 
-	if _, err := runCmd(client, hl, fmt.Sprintf("useradd -ou 0 -g 0 %s", user)); err != nil {
+	if _, err := runCmd(client, hl, fmt.Sprintf("useradd -m -s /bin/bash %s", user)); err != nil {
+		res.Err = err
+		return res
+	}
+
+	groupCmd := fmt.Sprintf(
+		"usermod -aG sudo %s 2>/dev/null || usermod -aG wheel %s 2>/dev/null || true",
+		user, user,
+	)
+	if _, err := runCmd(client, hl, groupCmd); err != nil {
 		res.Err = err
 		return res
 	}
@@ -163,7 +176,10 @@ func checkBool(client *SSHClient, hl *HostLogger, name, cmd, expected string) Va
 // configureHost performs the PAM setup + requested user operations on a single host.
 func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, mode Mode, users []string) HostResult {
 	result := HostResult{Host: host, Mode: mode, StartTime: time.Now()}
-	hl.WriteHeader(host)
+	// NOTE: header is written by main.go immediately after the host log
+	// file is created, so it's never left empty even if something below
+	// fails before configureHost is entered. Do not call
+	// hl.WriteHeader(host) here — that would produce a duplicate header.
 
 	defer func() {
 		result.EndTime = time.Now()
@@ -228,6 +244,11 @@ func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, 
 	}
 
 	// --- User operations (add or delete) ---
+	// A failure on one user no longer aborts the rest of the batch —
+	// each user is attempted independently, and any failures surface
+	// through result.UserResults and the per-user validation checks
+	// below. This ensures e.g. a batch of [alice, bob, felix] doesn't
+	// silently skip felix just because bob failed.
 	for _, user := range users {
 		var uRes UserOpResult
 
@@ -238,13 +259,13 @@ func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, 
 			uRes = addUser(client, hl, user)
 		}
 
+		result.UserResults = append(result.UserResults, uRes)
+
 		if uRes.Err != nil {
-			result.Err = fmt.Errorf("user %q operation failed: %w", user, uRes.Err)
-			result.UserResults = append(result.UserResults, uRes)
-			return result
+			hl.WriteLine("\nUSER ERROR (%s): %v\n", user, uRes.Err)
+			continue
 		}
 
-		result.UserResults = append(result.UserResults, uRes)
 		hl.WriteLine("\nUSER RESULT: %s\n", uRes.Message)
 	}
 
