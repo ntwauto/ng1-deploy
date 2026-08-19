@@ -1,0 +1,27 @@
+# NETSCOUT nGenius PAM deployment configuration
+
+port: "8443"
+
+# The PAM line template. {port} is substituted from the value above.
+pam_line: "auth sufficient pam_ng1.so port={port} secure=true failover=true fallback=true timeout=10 retries=1"
+
+ssh:
+  port: 22
+  connect_timeout_seconds: 15
+  command_timeout_seconds: 60
+
+logging:
+  log_dir: "./ng1_logs"
+
+devices:
+  - "10.0.0.1"
+  - "10.0.0.2"
+  - "host1.example.com"
+
+users_add:
+  - "jdoe"
+  - "asmith"
+
+users_delete:
+  - "olduser1"
+  - "olduser2"
