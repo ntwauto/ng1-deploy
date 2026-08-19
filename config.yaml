@@ -1,9 +1,15 @@
 # NETSCOUT nGenius PAM deployment configuration
 
-port: "8443"
+# The central nGenius authentication server that every device's PAM
+# config will point to. This is NOT one of the devices being configured —
+# it's the fixed auth server all devices authenticate against.
+ngenius_server:
+  ip: "167.35.2.50"
+  port: "8443"
 
-# The PAM line template. {port} is substituted from the value above.
-pam_line: "auth sufficient pam_ng1.so port={port} secure=true failover=true fallback=true timeout=10 retries=1"
+# The PAM line template written to /etc/pam.d/pam_ng1_auth on every device.
+# {ip} and {port} are substituted from ngenius_server above.
+pam_line: "auth sufficient pam_ng1.so ip={ip} port={port} secure=true failover=true fallback=true timeout=10 retries=1"
 
 ssh:
   port: 22
@@ -13,6 +19,9 @@ ssh:
 logging:
   log_dir: "./ng1_logs"
 
+# The devices to loop over and configure. Each one gets SSH'd into,
+# has its PAM stack updated to point at ngenius_server above, and has
+# the requested users added/removed.
 devices:
   - "10.0.0.1"
   - "10.0.0.2"
