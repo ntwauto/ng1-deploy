@@ -34,6 +34,15 @@ var configSearchPaths = []string{
 	"/opt/ng1-deploy/config.yaml",
 }
 
+// NGeniusServerConfig is the fixed central nGenius authentication server
+// that every device's PAM config will be pointed at. This is distinct
+// from the devices list — it is the target servers authenticate against,
+// not something being configured itself.
+type NGeniusServerConfig struct {
+	IP   string `yaml:"ip"`
+	Port string `yaml:"port"`
+}
+
 type SSHConfig struct {
 	Username              string `yaml:"username"` // usually left blank, prompted at runtime
 	Password              string `yaml:"password"` // usually left blank, prompted at runtime
@@ -47,21 +56,28 @@ type LoggingConfig struct {
 }
 
 type Config struct {
-	Port        string        `yaml:"port"`
-	PamLineTmpl string        `yaml:"pam_line"`
-	SSH         SSHConfig     `yaml:"ssh"`
-	Logging     LoggingConfig `yaml:"logging"`
-	Devices     []string      `yaml:"devices"`
-	UsersAdd    []string      `yaml:"users_add"`
-	UsersDelete []string      `yaml:"users_delete"`
+	NGeniusServer NGeniusServerConfig `yaml:"ngenius_server"`
+	PamLineTmpl   string              `yaml:"pam_line"`
+	SSH           SSHConfig           `yaml:"ssh"`
+	Logging       LoggingConfig       `yaml:"logging"`
+	Devices       []string            `yaml:"devices"`
+	UsersAdd      []string            `yaml:"users_add"`
+	UsersDelete   []string            `yaml:"users_delete"`
 
 	// loadedFrom records which path was actually used, for logging/diagnostics.
 	loadedFrom string
 }
 
-// PAMLine renders the pam_line template with port substituted.
+// PAMLine renders the pam_line template with the nGenius server's ip and
+// port substituted in. This is the single source of truth for both the
+// PAM auth config written to devices AND the reachability check, so the
+// two can never drift out of sync (unlike the original script, where the
+// PAM line had its own separately-hardcoded copy of the IP/port).
 func (c *Config) PAMLine() string {
-	return strings.ReplaceAll(c.PamLineTmpl, "{port}", c.Port)
+	line := c.PamLineTmpl
+	line = strings.ReplaceAll(line, "{ip}", c.NGeniusServer.IP)
+	line = strings.ReplaceAll(line, "{port}", c.NGeniusServer.Port)
+	return line
 }
 
 // resolveConfigPath figures out where config.yaml actually lives, checking
@@ -188,8 +204,11 @@ func LoadConfig(explicitPath string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	if c.Port == "" {
-		return fmt.Errorf("port is required")
+	if c.NGeniusServer.IP == "" {
+		return fmt.Errorf("ngenius_server.ip is required")
+	}
+	if c.NGeniusServer.Port == "" {
+		return fmt.Errorf("ngenius_server.port is required")
 	}
 	if c.PamLineTmpl == "" {
 		return fmt.Errorf("pam_line is required")
