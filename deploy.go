@@ -355,6 +355,26 @@ func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, 
 
 
 
+validations = append(validations, checkBool(client, hl, "pam_ng1_auth Exists",
+    "test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL", "PASS"))
+
+validations = append(validations, checkBool(client, hl, "SSHD PAM Enabled",
+    `head -1 /etc/pam.d/sshd | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sshd)" || echo "FAIL: $(head -1 /etc/pam.d/sshd)"`,
+    "PASS"))
+
+validations = append(validations, checkBool(client, hl, "SUDO PAM Enabled",
+    `head -1 /etc/pam.d/sudo | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sudo)" || echo "FAIL: $(head -1 /etc/pam.d/sudo)"`,
+    "PASS"))
+
+validations = append(validations, checkBool(client, hl, "UsePAM Enabled",
+    `grep '^UsePAM yes' /etc/ssh/sshd_config && echo PASS || echo "FAIL: $(grep '^UsePAM' /etc/ssh/sshd_config || echo 'no UsePAM line found')"`,
+    "PASS"))
+
+validations = append(validations, checkBool(client, hl, "SSHD Running",
+    "pgrep -x sshd >/dev/null && echo PASS || echo FAIL", "PASS"))
+
+
+
 ====================================================
 COMMAND:
 test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL
