@@ -1,0 +1,193 @@
+
+HOST: 10.1.1.1
+START: 2026-08-25 16:13:32
+
+
+HOST: 10.1.1.1
+START: 2026-08-25 16:13:38
+
+
+====================================================
+COMMAND:
+mkdir -p /root/ng1_auth_backup
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+cp -p /etc/pam.d/sshd /root/ng1_auth_backup/sshd.20260825_161338.bak 2>/dev/null || true
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+mkdir -p /root/ng1_auth_backup
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+cp -p /etc/pam.d/sudo /root/ng1_auth_backup/sudo.20260825_161338.bak 2>/dev/null || true
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+mkdir -p /root/ng1_auth_backup
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+cp -p /etc/ssh/sshd_config /root/ng1_auth_backup/sshd_config.20260825_161338.bak 2>/dev/null || true
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+if [ -f /etc/pam.d/pam_ng1_auth ]; then echo EXISTS; else echo MISSING; fi
+
+OUTPUT:
+EXISTS
+
+
+====================================================
+COMMAND:
+mkdir -p /root/ng1_auth_backup
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+cp -p /etc/pam.d/pam_ng1_auth /root/ng1_auth_backup/pam_ng1_auth.20260825_161338.bak 2>/dev/null || true
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+cat > /etc/pam.d/pam_ng1_auth << 'EOF'
+auth sufficient pam_ng1.so ip=67.35.2.50 port=8443 secure=true failover=true fallback=true timeout=10 retries=1
+EOF
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+chmod +x /etc/pam.d/pam_ng1_auth
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+sed -i '/pam_ng1_auth/d' /etc/pam.d/sshd && sed -i '1i auth include pam_ng1_auth' /etc/pam.d/sshd
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+sed -i '/pam_ng1_auth/d' /etc/pam.d/sudo && sed -i '1i auth include pam_ng1_auth' /etc/pam.d/sudo
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+grep -q '^UsePAM yes' /etc/ssh/sshd_config || sed -i 's/^#*UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+id alex >/dev/null 2>&1 && echo EXISTS || echo MISSING
+
+OUTPUT:
+MISSING
+
+
+USER RESULT: user "alex" doesn't exist on device, no action taken
+
+====================================================
+COMMAND:
+service sshd restart || systemctl restart sshd
+
+OUTPUT:
+Restarting sshd (via systemctl):  [  OK  ]
+
+
+====================================================
+COMMAND:
+test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+head -1 /etc/pam.d/sshd | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sshd)" || echo "FAIL: $(head -1 /etc/pam.d/sshd)"
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+head -1 /etc/pam.d/sudo | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sudo)" || echo "FAIL: $(head -1 /etc/pam.d/sudo)"
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+grep '^UsePAM yes' /etc/ssh/sshd_config && echo PASS || echo "FAIL: $(grep '^UsePAM' /etc/ssh/sshd_config || echo 'no UsePAM line found')"
+
+OUTPUT:
+UsePAM yes
+PASS
+
+
+====================================================
+COMMAND:
+pgrep -x sshd >/dev/null && echo PASS || echo FAIL
+
+OUTPUT:
+PASS
+
+
+====================================================
+COMMAND:
+timeout 5 bash -c '</dev/tcp/67.35.2.50/8443' && echo PASS || echo FAIL
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+id alex >/dev/null 2>&1 && echo EXISTS || echo MISSING
+
+OUTPUT:
+MISSING
+
+
+====================================================
+VALIDATION RESULTS
+pam_ng1_auth Exists : FAIL ()
+SSHD PAM Enabled : FAIL ()
+SUDO PAM Enabled : FAIL ()
+UsePAM Enabled : PASS (UsePAM yes
+PASS)
+SSHD Running : PASS (PASS)
+nGenius Server Reachable : FAIL ()
+User alex (delete) : PASS (exists=false)
+
+END: 2026-08-25 16:13:38
