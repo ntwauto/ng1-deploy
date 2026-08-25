@@ -376,32 +376,35 @@ validations = append(validations, checkBool(client, hl, "SSHD Running",
 
 
 ====================================================
+====================================================
 COMMAND:
 test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL
 
 OUTPUT:
+PASS
 
 
 ====================================================
 COMMAND:
-head -1 /etc/pam.d/sshd
+head -1 /etc/pam.d/sshd | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sshd)" || echo "FAIL: $(head -1 /etc/pam.d/sshd)"
 
 OUTPUT:
 
 
 ====================================================
 COMMAND:
-head -1 /etc/pam.d/sudo
+head -1 /etc/pam.d/sudo | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sudo)" || echo "FAIL: $(head -1 /etc/pam.d/sudo)"
 
 OUTPUT:
 
 
 ====================================================
 COMMAND:
-grep '^UsePAM yes' /etc/ssh/sshd_config || true
+grep '^UsePAM yes' /etc/ssh/sshd_config && echo PASS || echo "FAIL: $(grep '^UsePAM' /etc/ssh/sshd_config || echo 'no UsePAM line found')"
 
 OUTPUT:
 UsePAM yes
+PASS
 
 
 ====================================================
@@ -423,3 +426,31 @@ COMMAND:
 id alex >/dev/null 2>&1 && echo EXISTS || echo MISSING
 
 OUTPUT:
+
+
+
+
+    -> VALIDATION FAILED (-2562047h47m16.85s)
+
+======================================================================
+ NETSCOUT nGenius PAM Deployment Report
+======================================================================
+Mode              : DELETE
+Started           : 2026-08-25 15:56:06
+Finished          : 2026-08-25 15:56:12
+Duration          : 6s
+Hosts Processed   : 1
+Successful        : 0
+Validation Failed : 1
+Errored           : 0
+----------------------------------------------------------------------
+
+Host: 10.1.1.6  [VALIDATION FAILED]
+  - user "alex" doesn't exist on device, no action taken
+  [PASS] pam_ng1_auth Exists
+  [FAIL] SSHD PAM Enabled
+  [FAIL] SUDO PAM Enabled
+  [PASS] UsePAM Enabled
+  [FAIL] SSHD Running
+  [FAIL] nGenius Server Reachable
+  [PASS] User alex (delete)
