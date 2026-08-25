@@ -347,3 +347,59 @@ func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, 
 
 	return result
 }
+
+
+
+
+------
+
+
+
+====================================================
+COMMAND:
+test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+head -1 /etc/pam.d/sshd
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+head -1 /etc/pam.d/sudo
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+grep '^UsePAM yes' /etc/ssh/sshd_config || true
+
+OUTPUT:
+UsePAM yes
+
+
+====================================================
+COMMAND:
+pgrep -x sshd >/dev/null && echo PASS || echo FAIL
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+timeout 5 bash -c '</dev/tcp/67.35.2.50/8443' && echo PASS || echo FAIL
+
+OUTPUT:
+
+
+====================================================
+COMMAND:
+id alex >/dev/null 2>&1 && echo EXISTS || echo MISSING
+
+OUTPUT:
