@@ -57,11 +57,16 @@ func (c *SSHClient) Run(command string) (string, error) {
 
 	select {
 	case err := <-done:
-		_ = err
-		return outBuf.String(), nil
+		// session.Run has fully returned, so all output has been
+		// flushed into outBuf by THIS point — safe to read now.
+		return outBuf.String(), err
 	case <-time.After(c.cmdTO):
 		session.Close()
-		return outBuf.String(), fmt.Errorf("command timed out after %s: %s", c.cmdTO, command)
+		// Draining done here is optional but avoids a goroutine leak
+		// warning; session.Close() will cause session.Run() to return
+		// an error, unblocking the goroutine so it can send on done.
+		go func() { <-done }()
+		return "", fmt.Errorf("command timed out after %s: %s", c.cmdTO, command)
 	}
 }
 
