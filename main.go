@@ -146,6 +146,22 @@ func main() {
 		result := configureHost(client, hl, host, cfg, mode, users)
 
 		client.Close()
+
+		// The sshd restart at the end of configureHost can leave the
+		// just-used connection in an unreliable state (it disrupts
+		// session/channel multiplexing on the box being restarted).
+		// Re-login with a fresh connection to confirm sshd actually
+		// came back up cleanly, but only if nothing already failed.
+		if result.Err == nil {
+			sshOK := verifySSHDRunning(host, username, password, cfg, hl)
+			if !sshOK {
+				result.Success = false
+				if result.Err == nil {
+					result.Err = fmt.Errorf("sshd did not come back up after restart")
+				}
+			}
+		}
+
 		hl.Close()
 
 		report.AddResult(result)
@@ -184,6 +200,39 @@ func main() {
 	if failed > 0 || errored > 0 {
 		os.Exit(1)
 	}
+}
+
+// verifySSHDRunning re-connects to host with a fresh SSH session (since
+// the connection used during configureHost may be unreliable after the
+// sshd restart triggered at the end of that function) and confirms sshd
+// is actually running post-restart.
+func verifySSHDRunning(host, username, password string, cfg *Config, hl *HostLogger) bool {
+	hl.WriteLine("\n====================================================\n")
+	hl.WriteLine("POST-RESTART CHECK: reconnecting to verify sshd...\n")
+
+	var verifyClient *SSHClient
+	var err error
+	for i := 0; i < 5; i++ {
+		time.Sleep(1 * time.Second)
+		verifyClient, err = NewSSHClient(host, username, password, cfg)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		hl.WriteLine("POST-RESTART CHECK FAILED: could not reconnect: %v\n", err)
+		return false
+	}
+	defer verifyClient.Close()
+
+	out, err := verifyClient.Run("pgrep -x sshd >/dev/null && echo PASS || echo FAIL")
+	if err != nil || !strings.Contains(out, "PASS") {
+		hl.WriteLine("POST-RESTART CHECK FAILED: sshd not confirmed running (out=%q err=%v)\n", out, err)
+		return false
+	}
+
+	hl.WriteLine("POST-RESTART CHECK: sshd confirmed running\n")
+	return true
 }
 
 func printBanner(mode Mode, hostCount int, users []string) {
