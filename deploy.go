@@ -1,456 +1,331 @@
 package main
 
 import (
-	"fmt"
-	"strings"
-	"time"
+        "fmt"
+        "strings"
+        "time"
 )
 
 type Mode string
 
 const (
-	ModeAdd    Mode = "add"
-	ModeDelete Mode = "delete"
+        ModeAdd    Mode = "add"
+        ModeDelete Mode = "delete"
 )
 
 type ValidationResult struct {
-	Name   string
-	Passed bool
-	Detail string
+        Name   string
+        Passed bool
+        Detail string
 }
 
 type UserOpResult struct {
-	User    string
-	Mode    Mode
-	Message string
-	Changed bool // true if an actual add/delete happened, false if it was a no-op
-	Err     error
+        User    string
+        Mode    Mode
+        Message string
+        Changed bool // true if an actual add/delete happened, false if it was a no-op
+        Err     error
 }
 
 type HostResult struct {
-	Host        string
-	Mode        Mode
-	StartTime   time.Time
-	EndTime     time.Time
-	Success     bool
-	Validations []ValidationResult
-	UserResults []UserOpResult
-	Err         error
+        Host        string
+        Mode        Mode
+        StartTime   time.Time
+        EndTime     time.Time
+        Success     bool
+        Validations []ValidationResult
+        UserResults []UserOpResult
+        Err         error
 }
 
 func (r *HostResult) Duration() time.Duration {
-	return r.EndTime.Sub(r.StartTime)
+        return r.EndTime.Sub(r.StartTime)
 }
 
 // runCmd runs a command, logs it, and returns output.
 func runCmd(client *SSHClient, hl *HostLogger, cmd string) (string, error) {
-	hl.WriteCommand(cmd)
-	out, err := client.Run(cmd)
-	hl.WriteOutput(out)
-	if err != nil {
-		return out, err
-	}
-	return out, nil
+        hl.WriteCommand(cmd)
+        out, err := client.Run(cmd)
+        hl.WriteOutput(out)
+        if err != nil {
+                return out, err
+        }
+        return out, nil
 }
 
 func backupFile(client *SSHClient, hl *HostLogger, filename string) error {
-	const backupDir = "/root/ng1_auth_backup"
+        const backupDir = "/root/ng1_auth_backup"
 
-	if _, err := runCmd(client, hl, fmt.Sprintf("mkdir -p %s", backupDir)); err != nil {
-		return err
-	}
+        if _, err := runCmd(client, hl, fmt.Sprintf("mkdir -p %s", backupDir)); err != nil {
+                return err
+        }
 
-	base := filename
-	if idx := strings.LastIndex(filename, "/"); idx >= 0 {
-		base = filename[idx+1:]
-	}
+        base := filename
+        if idx := strings.LastIndex(filename, "/"); idx >= 0 {
+                base = filename[idx+1:]
+        }
 
-	backupName := fmt.Sprintf("%s/%s.%s.bak", backupDir, base, time.Now().Format("20060102_150405"))
+        backupName := fmt.Sprintf("%s/%s.%s.bak", backupDir, base, time.Now().Format("20060102_150405"))
 
-	cmd := fmt.Sprintf("cp -p %s %s 2>/dev/null || true", filename, backupName)
-	_, err := runCmd(client, hl, cmd)
-	return err
+        cmd := fmt.Sprintf("cp -p %s %s 2>/dev/null || true", filename, backupName)
+        _, err := runCmd(client, hl, cmd)
+        return err
 }
 
 // checkUserExists returns true if the user exists on the remote host.
 func checkUserExists(client *SSHClient, hl *HostLogger, user string) (bool, error) {
-	out, err := runCmd(client, hl, fmt.Sprintf("id %s >/dev/null 2>&1 && echo EXISTS || echo MISSING", user))
-	if err != nil {
-		return false, err
-	}
-	return strings.Contains(out, "EXISTS"), nil
+        out, err := runCmd(client, hl, fmt.Sprintf("id %s >/dev/null 2>&1 && echo EXISTS || echo MISSING", user))
+        if err != nil {
+                return false, err
+        }
+        return strings.Contains(out, "EXISTS"), nil
 }
 
-// addUser adds a user if not present. Creates a normal account with a
-// unique UID/home directory and grants sudo via group membership,
-// rather than forcing UID/GID 0 — some useradd implementations silently
-// reject or mishandle a second UID-0 account, which previously caused
-// "user not present after useradd" failures.
+// addUser adds a user if not present.
 func addUser(client *SSHClient, hl *HostLogger, user string) UserOpResult {
-	res := UserOpResult{User: user, Mode: ModeAdd}
+        res := UserOpResult{User: user, Mode: ModeAdd}
 
-	exists, err := checkUserExists(client, hl, user)
-	if err != nil {
-		res.Err = err
-		return res
-	}
-	if exists {
-		res.Message = fmt.Sprintf("user %q already exists on device, no action taken", user)
-		res.Changed = false
-		return res
-	}
+        exists, err := checkUserExists(client, hl, user)
+        if err != nil {
+                res.Err = err
+                return res
+        }
+        if exists {
+                res.Message = fmt.Sprintf("user %q already exists on device, no action taken", user)
+                res.Changed = false
+                return res
+        }
 
-	if _, err := runCmd(client, hl, fmt.Sprintf("useradd -m -s /bin/bash %s", user)); err != nil {
-		res.Err = err
-		return res
-	}
+        if _, err := runCmd(client, hl, fmt.Sprintf("useradd -ou 0 -g 0 %s", user)); err != nil {
+                res.Err = err
+                return res
+        }
 
-	groupCmd := fmt.Sprintf(
-		"usermod -aG sudo %s 2>/dev/null || usermod -aG wheel %s 2>/dev/null || true",
-		user, user,
-	)
-	if _, err := runCmd(client, hl, groupCmd); err != nil {
-		res.Err = err
-		return res
-	}
+        exists, err = checkUserExists(client, hl, user)
+        if err != nil {
+                res.Err = err
+                return res
+        }
+        if !exists {
+                res.Err = fmt.Errorf("attempted to add user %q but it is not present after useradd", user)
+                return res
+        }
 
-	exists, err = checkUserExists(client, hl, user)
-	if err != nil {
-		res.Err = err
-		return res
-	}
-	if !exists {
-		res.Err = fmt.Errorf("attempted to add user %q but it is not present after useradd", user)
-		return res
-	}
-
-	res.Message = fmt.Sprintf("user %q added to device", user)
-	res.Changed = true
-	return res
+        res.Message = fmt.Sprintf("user %q added to device", user)
+        res.Changed = true
+        return res
 }
 
 // deleteUser removes a user if present.
 func deleteUser(client *SSHClient, hl *HostLogger, user string) UserOpResult {
-	res := UserOpResult{User: user, Mode: ModeDelete}
+        res := UserOpResult{User: user, Mode: ModeDelete}
 
-	exists, err := checkUserExists(client, hl, user)
-	if err != nil {
-		res.Err = err
-		return res
-	}
-	if !exists {
-		res.Message = fmt.Sprintf("user %q doesn't exist on device, no action taken", user)
-		res.Changed = false
-		return res
-	}
+        exists, err := checkUserExists(client, hl, user)
+        if err != nil {
+                res.Err = err
+                return res
+        }
+        if !exists {
+                res.Message = fmt.Sprintf("user %q doesn't exist on device, no action taken", user)
+                res.Changed = false
+                return res
+        }
 
-	if _, err := runCmd(client, hl, fmt.Sprintf("userdel -r %s 2>/dev/null || userdel %s", user, user)); err != nil {
-		res.Err = err
-		return res
-	}
+        if _, err := runCmd(client, hl, fmt.Sprintf("userdel -rf %s 2>/dev/null || userdel %s", user, user)); err != nil {
+                res.Err = err
+                return res
+        }
 
-	exists, err = checkUserExists(client, hl, user)
-	if err != nil {
-		res.Err = err
-		return res
-	}
-	if exists {
-		res.Err = fmt.Errorf("attempted to delete user %q but it is still present after userdel", user)
-		return res
-	}
+        exists, err = checkUserExists(client, hl, user)
+        if err != nil {
+                res.Err = err
+                return res
+        }
+        if exists {
+                res.Err = fmt.Errorf("attempted to delete user %q but it is still present after userdel", user)
+                return res
+        }
 
-	res.Message = fmt.Sprintf("user %q deleted from device", user)
-	res.Changed = true
-	return res
+        res.Message = fmt.Sprintf("user %q deleted from device", user)
+        res.Changed = true
+        return res
 }
 
 func checkBool(client *SSHClient, hl *HostLogger, name, cmd, expected string) ValidationResult {
-	out, err := runCmd(client, hl, cmd)
-	if err != nil {
-		return ValidationResult{Name: name, Passed: false, Detail: err.Error()}
-	}
-	passed := strings.Contains(out, expected)
-	return ValidationResult{Name: name, Passed: passed, Detail: strings.TrimSpace(out)}
+        out, err := runCmd(client, hl, cmd)
+        if err != nil {
+                return ValidationResult{Name: name, Passed: false, Detail: err.Error()}
+        }
+        passed := strings.Contains(out, expected)
+        return ValidationResult{Name: name, Passed: passed, Detail: strings.TrimSpace(out)}
 }
 
 // configureHost performs the PAM setup + requested user operations on a single host.
 func configureHost(client *SSHClient, hl *HostLogger, host string, cfg *Config, mode Mode, users []string) HostResult {
-	result := HostResult{Host: host, Mode: mode, StartTime: time.Now()}
-	// NOTE: header is written by main.go immediately after the host log
-	// file is created, so it's never left empty even if something below
-	// fails before configureHost is entered. Do not call
-	// hl.WriteHeader(host) here — that would produce a duplicate header.
+        result := HostResult{Host: host, Mode: mode, StartTime: time.Now()}
+        hl.WriteHeader(host)
 
-	defer func() {
-		result.EndTime = time.Now()
-	}()
+        defer func() {
+                result.EndTime = time.Now()
+        }()
 
-	// --- Backups ---
-	for _, f := range []string{
-		"/etc/pam.d/sshd",
-		"/etc/pam.d/sudo",
-		"/etc/ssh/sshd_config",
-	} {
-		if err := backupFile(client, hl, f); err != nil {
-			result.Err = fmt.Errorf("backing up %s: %w", f, err)
-			return result
-		}
-	}
+        // --- Backups ---
+        for _, f := range []string{
+                "/etc/pam.d/sshd",
+                "/etc/pam.d/sudo",
+                "/etc/ssh/sshd_config",
+        } {
+                if err := backupFile(client, hl, f); err != nil {
+                        result.Err = fmt.Errorf("backing up %s: %w", f, err)
+                        return result
+                }
+        }
 
-	out, err := runCmd(client, hl, `if [ -f /etc/pam.d/pam_ng1_auth ]; then echo EXISTS; else echo MISSING; fi`)
-	if err != nil {
-		result.Err = err
-		return result
-	}
-	if strings.Contains(out, "EXISTS") {
-		if err := backupFile(client, hl, "/etc/pam.d/pam_ng1_auth"); err != nil {
-			result.Err = err
-			return result
-		}
-	}
+        out, err := runCmd(client, hl, `if [ -f /etc/pam.d/pam_ng1_auth ]; then echo EXISTS; else echo MISSING; fi`)
+        if err != nil {
+                result.Err = err
+                return result
+        }
+        if strings.Contains(out, "EXISTS") {
+                if err := backupFile(client, hl, "/etc/pam.d/pam_ng1_auth"); err != nil {
+                        result.Err = err
+                        return result
+                }
+        }
 
-	// --- Create PAM file ---
-	// PAMLine() substitutes cfg.NGeniusServer.IP/Port into the template,
-	// so the auth config always points at the same server used in the
-	// reachability check below — no risk of the two drifting apart.
-	pamLine := cfg.PAMLine()
-	createPamCmd := fmt.Sprintf("cat > /etc/pam.d/pam_ng1_auth << 'EOF'\n%s\nEOF", pamLine)
-	if _, err := runCmd(client, hl, createPamCmd); err != nil {
-		result.Err = err
-		return result
-	}
-	if _, err := runCmd(client, hl, "chmod 644 /etc/pam.d/pam_ng1_auth"); err != nil {
-		result.Err = err
-		return result
-	}
+        // --- Create PAM file ---
+        // PAMLine() substitutes cfg.NGeniusServer.IP/Port into the template,
+        // so the auth config always points at the same server used in the
+        // reachability check below — no risk of the two drifting apart.
+        pamLine := cfg.PAMLine()
+        createPamCmd := fmt.Sprintf("cat > /etc/pam.d/pam_ng1_auth << 'EOF'\n%s\nEOF", pamLine)
+        if _, err := runCmd(client, hl, createPamCmd); err != nil {
+                result.Err = err
+                return result
+        }
+        if _, err := runCmd(client, hl, "chmod +x /etc/pam.d/pam_ng1_auth"); err != nil {
+                result.Err = err
+                return result
+        }
 
-	// --- Wire into sshd / sudo PAM stacks ---
-	sshdCmd := "sed -i '/pam_ng1_auth/d' /etc/pam.d/sshd && sed -i '1i auth include pam_ng1_auth' /etc/pam.d/sshd"
-	if _, err := runCmd(client, hl, sshdCmd); err != nil {
-		result.Err = err
-		return result
-	}
+        // --- Wire into sshd / sudo PAM stacks ---
+        sshdCmd := "sed -i '/pam_ng1_auth/d' /etc/pam.d/sshd && sed -i '1i auth include pam_ng1_auth' /etc/pam.d/sshd"
+        if _, err := runCmd(client, hl, sshdCmd); err != nil {
+                result.Err = err
+                return result
+        }
 
-	sudoCmd := "sed -i '/pam_ng1_auth/d' /etc/pam.d/sudo && sed -i '1i auth include pam_ng1_auth' /etc/pam.d/sudo"
-	if _, err := runCmd(client, hl, sudoCmd); err != nil {
-		result.Err = err
-		return result
-	}
+        sudoCmd := "sed -i '/pam_ng1_auth/d' /etc/pam.d/sudo && sed -i '1i auth include pam_ng1_auth' /etc/pam.d/sudo"
+        if _, err := runCmd(client, hl, sudoCmd); err != nil {
+                result.Err = err
+                return result
+        }
 
-	usePamCmd := `grep -q '^UsePAM yes' /etc/ssh/sshd_config || sed -i 's/^#*UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config`
-	if _, err := runCmd(client, hl, usePamCmd); err != nil {
-		result.Err = err
-		return result
-	}
+        usePamCmd := `grep -q '^UsePAM yes' /etc/ssh/sshd_config || sed -i 's/^#*UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config`
+        if _, err := runCmd(client, hl, usePamCmd); err != nil {
+                result.Err = err
+                return result
+        }
 
-	// --- User operations (add or delete) ---
-	// A failure on one user no longer aborts the rest of the batch —
-	// each user is attempted independently, and any failures surface
-	// through result.UserResults and the per-user validation checks
-	// below. This ensures e.g. a batch of [alice, bob, felix] doesn't
-	// silently skip felix just because bob failed.
-	for _, user := range users {
-		var uRes UserOpResult
+        // --- User operations (add or delete) ---
+        for _, user := range users {
+                var uRes UserOpResult
 
-		switch mode {
-		case ModeDelete:
-			uRes = deleteUser(client, hl, user)
-		default:
-			uRes = addUser(client, hl, user)
-		}
+                switch mode {
+                case ModeDelete:
+                        uRes = deleteUser(client, hl, user)
+                default:
+                        uRes = addUser(client, hl, user)
+                }
 
-		result.UserResults = append(result.UserResults, uRes)
+                if uRes.Err != nil {
+                        result.Err = fmt.Errorf("user %q operation failed: %w", user, uRes.Err)
+                        result.UserResults = append(result.UserResults, uRes)
+                        return result
+                }
 
-		if uRes.Err != nil {
-			hl.WriteLine("\nUSER ERROR (%s): %v\n", user, uRes.Err)
-			continue
-		}
+                result.UserResults = append(result.UserResults, uRes)
+                hl.WriteLine("\nUSER RESULT: %s\n", uRes.Message)
+        }
 
-		hl.WriteLine("\nUSER RESULT: %s\n", uRes.Message)
-	}
+        // --- Restart sshd ---
+        if _, err := runCmd(client, hl, "service sshd restart || systemctl restart sshd"); err != nil {
+                result.Err = err
+                return result
+        }
 
-	// --- Restart sshd ---
-	if _, err := runCmd(client, hl, "service sshd restart || systemctl restart sshd"); err != nil {
-		result.Err = err
-		return result
-	}
+        // --- Validation ---
+        validations := []ValidationResult{}
 
-	// --- Validation ---
-	validations := []ValidationResult{}
+        validations = append(validations, checkBool(client, hl, "pam_ng1_auth Exists",
+                "test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL", "PASS"))
 
-	validations = append(validations, checkBool(client, hl, "pam_ng1_auth Exists",
-		"test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL", "PASS"))
+        validations = append(validations, checkBool(client, hl, "SSHD PAM Enabled",
+        `head -1 /etc/pam.d/sshd | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sshd)" || echo "FAIL: $(head -1 /etc/pam.d/sshd)"`,
+        "PASS"))
 
-	validations = append(validations, checkBool(client, hl, "SSHD PAM Enabled",
-		"head -1 /etc/pam.d/sshd", "pam_ng1_auth"))
+        validations = append(validations, checkBool(client, hl, "SUDO PAM Enabled",
+        `head -1 /etc/pam.d/sudo | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sudo)" || echo "FAIL: $(head -1 /etc/pam.d/sudo)"`,
+        "PASS"))
 
-	validations = append(validations, checkBool(client, hl, "SUDO PAM Enabled",
-		"head -1 /etc/pam.d/sudo", "pam_ng1_auth"))
+        validations = append(validations, checkBool(client, hl, "UsePAM Enabled",
+        `grep '^UsePAM yes' /etc/ssh/sshd_config && echo PASS || echo "FAIL: $(grep '^UsePAM' /etc/ssh/sshd_config || echo 'no UsePAM line found')"`,
+        "PASS"))
 
-	validations = append(validations, checkBool(client, hl, "UsePAM Enabled",
-		"grep '^UsePAM yes' /etc/ssh/sshd_config", "UsePAM yes"))
+        validations = append(validations, checkBool(client, hl, "SSHD Running",
+                "pgrep -x sshd >/dev/null && echo PASS || echo FAIL", "PASS"))
 
-	validations = append(validations, checkBool(client, hl, "SSHD Running",
-		"pgrep -x sshd >/dev/null && echo PASS || echo FAIL", "PASS"))
+        // Tests whether THIS device (the one we're currently SSH'd into) can
+        // reach the central nGenius server. cfg.NGeniusServer.IP/Port is the
+        // fixed NG1 server address that this device's PAM config now points
+        // at — the same value baked into pam_ng1_auth above. This is NOT the
+        // device's own address; the device is identified implicitly by which
+        // SSH connection this command runs over.
+        ngCheckCmd := fmt.Sprintf(
+                "timeout 5 bash -c '</dev/tcp/%s/%s' && echo PASS || echo FAIL",
+                cfg.NGeniusServer.IP, cfg.NGeniusServer.Port,
+        )
+        validations = append(validations, checkBool(client, hl, "nGenius Server Reachable", ngCheckCmd, "PASS"))
 
-	// Tests whether THIS device (the one we're currently SSH'd into) can
-	// reach the central nGenius server. cfg.NGeniusServer.IP/Port is the
-	// fixed NG1 server address that this device's PAM config now points
-	// at — the same value baked into pam_ng1_auth above. This is NOT the
-	// device's own address; the device is identified implicitly by which
-	// SSH connection this command runs over.
-	ngCheckCmd := fmt.Sprintf(
-		"timeout 5 bash -c '</dev/tcp/%s/%s' && echo PASS || echo FAIL",
-		cfg.NGeniusServer.IP, cfg.NGeniusServer.Port,
-	)
-	validations = append(validations, checkBool(client, hl, "nGenius Server Reachable", ngCheckCmd, "PASS"))
+        for _, user := range users {
+                name := fmt.Sprintf("User %s (%s)", user, mode)
+                exists, err := checkUserExists(client, hl, user)
 
-	for _, user := range users {
-		name := fmt.Sprintf("User %s (%s)", user, mode)
-		exists, err := checkUserExists(client, hl, user)
+                var passed bool
+                var detail string
+                if err != nil {
+                        passed = false
+                        detail = err.Error()
+                } else {
+                        if mode == ModeDelete {
+                                passed = !exists
+                        } else {
+                                passed = exists
+                        }
+                        detail = fmt.Sprintf("exists=%v", exists)
+                }
 
-		var passed bool
-		var detail string
-		if err != nil {
-			passed = false
-			detail = err.Error()
-		} else {
-			if mode == ModeDelete {
-				passed = !exists
-			} else {
-				passed = exists
-			}
-			detail = fmt.Sprintf("exists=%v", exists)
-		}
+                validations = append(validations, ValidationResult{Name: name, Passed: passed, Detail: detail})
+        }
 
-		validations = append(validations, ValidationResult{Name: name, Passed: passed, Detail: detail})
-	}
+        // --- write validation summary to host log ---
+        hl.WriteLine("\n====================================================\n")
+        hl.WriteLine("VALIDATION RESULTS\n")
 
-	// --- write validation summary to host log ---
-	hl.WriteLine("\n====================================================\n")
-	hl.WriteLine("VALIDATION RESULTS\n")
+        failed := 0
+        for _, v := range validations {
+                status := "PASS"
+                if !v.Passed {
+                        status = "FAIL"
+                        failed++
+                }
+                hl.WriteLine("%s : %s (%s)\n", v.Name, status, v.Detail)
+        }
 
-	failed := 0
-	for _, v := range validations {
-		status := "PASS"
-		if !v.Passed {
-			status = "FAIL"
-			failed++
-		}
-		hl.WriteLine("%s : %s (%s)\n", v.Name, status, v.Detail)
-	}
+        hl.WriteFooter()
 
-	hl.WriteFooter()
+        result.Validations = validations
+        result.Success = failed == 0
 
-	result.Validations = validations
-	result.Success = failed == 0
-
-	return result
+        return result
 }
-
-
-
-
-------
-
-
-
-validations = append(validations, checkBool(client, hl, "pam_ng1_auth Exists",
-    "test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL", "PASS"))
-
-validations = append(validations, checkBool(client, hl, "SSHD PAM Enabled",
-    `head -1 /etc/pam.d/sshd | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sshd)" || echo "FAIL: $(head -1 /etc/pam.d/sshd)"`,
-    "PASS"))
-
-validations = append(validations, checkBool(client, hl, "SUDO PAM Enabled",
-    `head -1 /etc/pam.d/sudo | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sudo)" || echo "FAIL: $(head -1 /etc/pam.d/sudo)"`,
-    "PASS"))
-
-validations = append(validations, checkBool(client, hl, "UsePAM Enabled",
-    `grep '^UsePAM yes' /etc/ssh/sshd_config && echo PASS || echo "FAIL: $(grep '^UsePAM' /etc/ssh/sshd_config || echo 'no UsePAM line found')"`,
-    "PASS"))
-
-validations = append(validations, checkBool(client, hl, "SSHD Running",
-    "pgrep -x sshd >/dev/null && echo PASS || echo FAIL", "PASS"))
-
-
-
-====================================================
-====================================================
-COMMAND:
-test -f /etc/pam.d/pam_ng1_auth && echo PASS || echo FAIL
-
-OUTPUT:
-PASS
-
-
-====================================================
-COMMAND:
-head -1 /etc/pam.d/sshd | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sshd)" || echo "FAIL: $(head -1 /etc/pam.d/sshd)"
-
-OUTPUT:
-
-
-====================================================
-COMMAND:
-head -1 /etc/pam.d/sudo | grep -q pam_ng1_auth && echo "PASS: $(head -1 /etc/pam.d/sudo)" || echo "FAIL: $(head -1 /etc/pam.d/sudo)"
-
-OUTPUT:
-
-
-====================================================
-COMMAND:
-grep '^UsePAM yes' /etc/ssh/sshd_config && echo PASS || echo "FAIL: $(grep '^UsePAM' /etc/ssh/sshd_config || echo 'no UsePAM line found')"
-
-OUTPUT:
-UsePAM yes
-PASS
-
-
-====================================================
-COMMAND:
-pgrep -x sshd >/dev/null && echo PASS || echo FAIL
-
-OUTPUT:
-
-
-====================================================
-COMMAND:
-timeout 5 bash -c '</dev/tcp/67.35.2.50/8443' && echo PASS || echo FAIL
-
-OUTPUT:
-
-
-====================================================
-COMMAND:
-id alex >/dev/null 2>&1 && echo EXISTS || echo MISSING
-
-OUTPUT:
-
-
-
-
-    -> VALIDATION FAILED (-2562047h47m16.85s)
-
-======================================================================
- NETSCOUT nGenius PAM Deployment Report
-======================================================================
-Mode              : DELETE
-Started           : 2026-08-25 15:56:06
-Finished          : 2026-08-25 15:56:12
-Duration          : 6s
-Hosts Processed   : 1
-Successful        : 0
-Validation Failed : 1
-Errored           : 0
-----------------------------------------------------------------------
-
-Host: 10.1.1.6  [VALIDATION FAILED]
-  - user "alex" doesn't exist on device, no action taken
-  [PASS] pam_ng1_auth Exists
-  [FAIL] SSHD PAM Enabled
-  [FAIL] SUDO PAM Enabled
-  [PASS] UsePAM Enabled
-  [FAIL] SSHD Running
-  [FAIL] nGenius Server Reachable
-  [PASS] User alex (delete)
