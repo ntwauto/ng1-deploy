@@ -162,6 +162,7 @@ func main() {
 			}
 		}
 
+		hl.WriteFooter()
 		hl.Close()
 
 		report.AddResult(result)
